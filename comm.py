@@ -78,7 +78,7 @@ def parse_comments(comments, post_uuid, post_title):
             'comment': comment['text'],
             'date': utc_to_eest(comment['created_at']).strftime('%Y-%m-%d %H:%M:%S %Z'),
             'likes': comment['likes'],
-            'post_uuid': post_uuid,
+            #'post_uuid': post_uuid,
             'post_title': post_title,
             'post_link': f"https://moescape.ai/posts/{post_uuid}"
         }
