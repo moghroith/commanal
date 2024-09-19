@@ -80,7 +80,7 @@ def parse_comments(comments, post_uuid, post_title):
             'likes': comment['likes'],
             'post_uuid': post_uuid,
             'post_title': post_title,
-            'post_link': f"https://moescape.ai/post/{post_uuid}"
+            'post_link': f"https://moescape.ai/posts/{post_uuid}"
         }
         parsed_comments.append(parsed_comment)
         
