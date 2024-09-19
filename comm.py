@@ -131,8 +131,8 @@ if user_id and num_posts:
         if all_comments:
             df = pd.DataFrame(all_comments)
             
-            # Create a dictionary mapping post_link to post_title
-            link_to_title = dict(zip(df['post_link'], df['post_title']))
+            # Create a list of titles in the same order as the links
+            titles = df['post_title'].tolist()
             
             # Remove post_title and post_uuid columns
             df = df.drop(columns=['post_title', 'post_uuid'])
@@ -144,7 +144,7 @@ if user_id and num_posts:
                         "Post Link",
                         help="Click to open the post",
                         validate="https://moescape.ai/posts/.*",
-                        display_text=lambda x: link_to_title[x]  # Use the mapping to get the title
+                        display_text=titles  # Use the list of titles
                     )
                 },
                 hide_index=True
