@@ -131,24 +131,22 @@ if user_id and num_posts:
         if all_comments:
             df = pd.DataFrame(all_comments)
             
-            # Create a list of titles in the same order as the links
-            titles = df['post_title'].tolist()
+            # Create a dictionary mapping post_link to post_title
+            link_to_title = dict(zip(df['post_link'], df['post_title']))
+            
+            # Define a formatter function
+            def format_link(link):
+                title = link_to_title.get(link, "Open post")
+                return f'<a href="{link}" target="_blank">{title}</a>'
+            
+            # Apply the formatter to the post_link column
+            df['post_link'] = df['post_link'].apply(format_link)
             
             # Remove post_title and post_uuid columns
             df = df.drop(columns=['post_title', 'post_uuid'])
             
-            st.dataframe(
-                df,
-                column_config={
-                    "post_link": st.column_config.LinkColumn(
-                        "Post Link",
-                        help="Click to open the post",
-                        validate="https://moescape.ai/posts/.*",
-                        display_text=titles  # Use the list of titles
-                    )
-                },
-                hide_index=True
-            )
+            # Display the dataframe
+            st.write(df.to_html(escape=False, index=False), unsafe_allow_html=True)
             
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button(
@@ -160,5 +158,6 @@ if user_id and num_posts:
             )
         else:
             st.write("No comments found for this user's posts.")
+
     else:
         st.write("No posts found for this user.")
