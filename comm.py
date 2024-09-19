@@ -47,7 +47,7 @@ def fetch_with_rate_limit(url, max_retries=5, initial_delay=2):
 
 @st.cache_data(ttl=3600)
 def fetch_user_posts(user_id, limit=500):
-    url = f"https://api.yodayo.com/v1/users/{user_id}/posts?offset=0&limit={limit}"
+    url = f"https://api.moescape.ai/v1/users/{user_id}/posts?offset=0&limit={limit}"
     data = fetch_with_rate_limit(url)
     if data:
         return data
@@ -57,7 +57,7 @@ def fetch_user_posts(user_id, limit=500):
 
 @st.cache_data(ttl=3600)
 def fetch_post_comments(post_uuid):
-    url = f"https://api.yodayo.com/v1/posts/{post_uuid}/comments?offset=0&limit=20"
+    url = f"https://api.moescape.ai/v1/posts/{post_uuid}/comments?offset=0&limit=20"
     data = fetch_with_rate_limit(url)
     if data:
         return data['comments']
@@ -80,7 +80,7 @@ def parse_comments(comments, post_uuid, post_title):
             'likes': comment['likes'],
             'post_uuid': post_uuid,
             'post_title': post_title,
-            'post_link': f"https://yodayo.com/post/{post_uuid}"
+            'post_link': f"https://moescape.ai/post/{post_uuid}"
         }
         parsed_comments.append(parsed_comment)
         
@@ -94,13 +94,13 @@ def parse_comments(comments, post_uuid, post_title):
                     'likes': reply['likes'],
                     'post_uuid': post_uuid,
                     'post_title': post_title,
-                    'post_link': f"https://yodayo.com/posts/{post_uuid}"
+                    'post_link': f"https://moescape.ai/posts/{post_uuid}"
                 }
                 parsed_comments.append(parsed_reply)
     
     return parsed_comments
 
-st.title('Yodayo User Posts and Comments')
+st.title('Moescape User Posts and Comments')
 
 user_id = st.text_input('Enter User ID')
 num_posts = st.number_input('Number of posts to scan (max 500)', min_value=1, max_value=500, value=10)
@@ -139,7 +139,7 @@ if user_id and num_posts:
             st.download_button(
                 "Download CSV",
                 csv,
-                "yodayo_comments.csv",
+                "moescape_comments.csv",
                 "text/csv",
                 key='download-csv'
             )
