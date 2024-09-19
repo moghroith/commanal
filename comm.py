@@ -131,6 +131,9 @@ if user_id and num_posts:
         if all_comments:
             df = pd.DataFrame(all_comments)
             
+            # Remove post_title and post_uuid columns
+            df = df.drop(columns=['post_title', 'post_uuid'])
+            
             st.dataframe(
                 df,
                 column_config={
@@ -138,7 +141,7 @@ if user_id and num_posts:
                         "Post Link",
                         help="Click to open the post",
                         validate="https://moescape.ai/posts/.*",
-                        display_text="Open post"
+                        display_text=df['post_title']  # Use post_title as display text
                     )
                 },
                 hide_index=True
