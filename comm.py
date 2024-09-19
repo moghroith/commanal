@@ -131,9 +131,18 @@ if user_id and num_posts:
         if all_comments:
             df = pd.DataFrame(all_comments)
             
-            df['post_link'] = df['post_link'].apply(lambda x: f'<a href="{x}" target="_blank">{x}</a>')
-            
-            st.write(df.to_html(escape=False, index=False), unsafe_allow_html=True)
+            st.dataframe(
+                df,
+                column_config={
+                    "post_link": st.column_config.LinkColumn(
+                        "Post Link",
+                        help="Click to open the post",
+                        validate="https://moescape.ai/posts/.*",
+                        display_text="Open post"
+                    )
+                },
+                hide_index=True
+            )
             
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button(
