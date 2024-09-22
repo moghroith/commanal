@@ -55,14 +55,17 @@ def fetch_user_posts(user_id, limit=2000):
         url = f"https://api.moescape.ai/v1/users/{user_id}/posts?offset={offset}&limit={batch_size}"
         data = fetch_with_rate_limit(url)
         
-        if not data:
+        if data is None:
             st.error(f"Failed to fetch posts at offset {offset}")
             break
         
-        posts = data.get('posts', [])
-        all_posts.extend(posts)
+        if not isinstance(data, list):
+            st.error(f"Unexpected data format received at offset {offset}")
+            break
         
-        if len(posts) < batch_size:  # No more posts to fetch
+        all_posts.extend(data)
+        
+        if len(data) < batch_size:  # No more posts to fetch
             break
         
         offset += batch_size
