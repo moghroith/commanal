@@ -24,7 +24,7 @@ rate_limiter = RateLimiter(calls_per_second=2)
 scraper = cloudscraper.create_scraper()
 
 @st.cache_data(ttl=3600)
-def fetch_with_rate_limit(url, max_retries=5, initial_delay=2):
+def fetch_with_rate_limit(url, max_retries=5, initial_delay=3):
     for attempt in range(max_retries):
         rate_limiter.wait()
         try:
@@ -103,7 +103,7 @@ def parse_comments(comments, post_uuid, post_title):
 st.title('Moescape User Posts and Comments')
 
 user_id = st.text_input('Enter User ID')
-num_posts = st.number_input('Number of posts to scan (max 500)', min_value=1, max_value=500, value=10)
+num_posts = st.number_input('Number of posts to scan (max 2000)', min_value=1, max_value=2000, value=10)
 order = st.radio("Order of posts to analyze", ('Most Recent', 'Oldest'))
 
 if user_id and num_posts:
