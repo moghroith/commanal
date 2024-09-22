@@ -46,14 +46,28 @@ def fetch_with_rate_limit(url, max_retries=5, initial_delay=3):
     return None
 
 @st.cache_data(ttl=3600)
-def fetch_user_posts(user_id, limit=500):
-    url = f"https://api.moescape.ai/v1/users/{user_id}/posts?offset=0&limit={limit}"
-    data = fetch_with_rate_limit(url)
-    if data:
-        return data
-    else:
-        st.error("Failed to fetch posts")
-        return []
+def fetch_user_posts(user_id, limit=2000):
+    all_posts = []
+    offset = 0
+    batch_size = 500  # API's maximum limit per request
+
+    while len(all_posts) < limit:
+        url = f"https://api.moescape.ai/v1/users/{user_id}/posts?offset={offset}&limit={batch_size}"
+        data = fetch_with_rate_limit(url)
+        
+        if not data:
+            st.error(f"Failed to fetch posts at offset {offset}")
+            break
+        
+        posts = data.get('posts', [])
+        all_posts.extend(posts)
+        
+        if len(posts) < batch_size:  # No more posts to fetch
+            break
+        
+        offset += batch_size
+
+    return all_posts[:limit]  # Return only the requested number of posts
 
 @st.cache_data(ttl=3600)
 def fetch_post_comments(post_uuid):
@@ -107,26 +121,24 @@ num_posts = st.number_input('Number of posts to scan (max 2000)', min_value=1, m
 order = st.radio("Order of posts to analyze", ('Most Recent', 'Oldest'))
 
 if user_id and num_posts:
-    posts = fetch_user_posts(user_id, limit=500)
+    posts = fetch_user_posts(user_id, limit=num_posts)
     
     if posts:
         total_posts = len(posts)
-        st.write(f"Found {total_posts} posts in total")
+        st.write(f"Found {total_posts} posts")
         
         posts.sort(key=lambda x: x.get('created_at', ''), reverse=(order == 'Most Recent'))
         
-        posts_to_analyze = posts[:num_posts]
-        
-        st.write(f"Analyzing the {'most recent' if order == 'Most Recent' else 'oldest'} {len(posts_to_analyze)} posts")
+        st.write(f"Analyzing the {'most recent' if order == 'Most Recent' else 'oldest'} {total_posts} posts")
         
         progress_bar = st.progress(0)
         all_comments = []
         
-        for i, post in enumerate(posts_to_analyze):
+        for i, post in enumerate(posts):
             comments = fetch_post_comments(post['uuid'])
             parsed_comments = parse_comments(comments, post['uuid'], post['title'])
             all_comments.extend(parsed_comments)
-            progress_bar.progress((i + 1) / len(posts_to_analyze))
+            progress_bar.progress((i + 1) / len(posts))
 
         if all_comments:
             df = pd.DataFrame(all_comments)
