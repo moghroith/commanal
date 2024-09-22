@@ -5,72 +5,90 @@ from datetime import datetime
 import time
 import logging
 import pytz
+import random
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 logging.basicConfig(level=logging.INFO)
 
-class RateLimiter:
-    def __init__(self, calls_per_second=1):
-        self.calls_per_second = calls_per_second
+class AdaptiveRateLimiter:
+    def __init__(self, initial_rate=1, max_rate=2, backoff_factor=2, jitter=0.1):
+        self.current_rate = initial_rate
+        self.max_rate = max_rate
+        self.backoff_factor = backoff_factor
+        self.jitter = jitter
         self.last_call = 0
 
     def wait(self):
         now = time.time()
         time_since_last_call = now - self.last_call
-        if time_since_last_call < 1 / self.calls_per_second:
-            time.sleep((1 / self.calls_per_second) - time_since_last_call)
+        wait_time = max(0, (1 / self.current_rate) - time_since_last_call)
+        wait_time += random.uniform(0, self.jitter)  # Add jitter
+        if wait_time > 0:
+            time.sleep(wait_time)
         self.last_call = time.time()
 
-rate_limiter = RateLimiter(calls_per_second=2)
+    def increase_rate(self):
+        self.current_rate = min(self.current_rate * self.backoff_factor, self.max_rate)
+
+    def decrease_rate(self):
+        self.current_rate /= self.backoff_factor
+
+rate_limiter = AdaptiveRateLimiter()
 scraper = cloudscraper.create_scraper()
 
-@st.cache_data(ttl=3600)
-def fetch_with_rate_limit(url, max_retries=5, initial_delay=3):
-    for attempt in range(max_retries):
-        rate_limiter.wait()
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=4, max=60),
+    retry=retry_if_exception_type((cloudscraper.exceptions.CloudflareChallengeError, Exception)),
+    reraise=True
+)
+def fetch_with_rate_limit(url):
+    rate_limiter.wait()
+    try:
+        response = scraper.get(url)
+        response.raise_for_status()
+        rate_limiter.increase_rate()  # Successful request, try increasing rate
+        return response.json()
+    except cloudscraper.exceptions.CloudflareChallengeError:
+        st.error("Cloudflare challenge detected. Unable to bypass.")
+        raise
+    except Exception as e:
+        if response.status_code == 429:
+            rate_limiter.decrease_rate()  # Rate limited, decrease rate
+            st.warning(f"Rate limited. Adjusting rate and retrying...")
+        else:
+            st.error(f"Failed to fetch data: {str(e)}")
+        raise
+
+def fetch_user_posts_generator(user_id, limit=2000):
+    offset = 0
+    batch_size = 500  # API's maximum limit per request
+    total_fetched = 0
+
+    while total_fetched < limit:
+        url = f"https://api.moescape.ai/v1/users/{user_id}/posts?offset={offset}&limit={batch_size}"
         try:
-            response = scraper.get(url)
-            response.raise_for_status()
-            return response.json()
-        except cloudscraper.exceptions.CloudflareChallengeError:
-            logging.error("Cloudflare challenge detected. Unable to bypass.")
-            return None
+            data = fetch_with_rate_limit(url)
+            if not data:
+                break
+            
+            for post in data:
+                if total_fetched >= limit:
+                    return
+                yield post
+                total_fetched += 1
+            
+            if len(data) < batch_size:  # No more posts to fetch
+                break
+            
+            offset += batch_size
         except Exception as e:
-            if response.status_code == 429:
-                delay = initial_delay * (2 ** attempt)
-                logging.info(f"Rate limited. Waiting {delay} seconds before retry.")
-                time.sleep(delay)
-            else:
-                logging.error(f"Failed to fetch data: {str(e)}")
-                return None
-    logging.error("Max retries reached. Giving up.")
-    return None
+            st.error(f"Error fetching posts: {str(e)}")
+            break
 
 @st.cache_data(ttl=3600)
 def fetch_user_posts(user_id, limit=2000):
-    all_posts = []
-    offset = 0
-    batch_size = 500  # API's maximum limit per request
-
-    while len(all_posts) < limit:
-        url = f"https://api.moescape.ai/v1/users/{user_id}/posts?offset={offset}&limit={batch_size}"
-        data = fetch_with_rate_limit(url)
-        
-        if data is None:
-            st.error(f"Failed to fetch posts at offset {offset}")
-            break
-        
-        if not isinstance(data, list):
-            st.error(f"Unexpected data format received at offset {offset}")
-            break
-        
-        all_posts.extend(data)
-        
-        if len(data) < batch_size:  # No more posts to fetch
-            break
-        
-        offset += batch_size
-
-    return all_posts[:limit]  # Return only the requested number of posts
+    return list(fetch_user_posts_generator(user_id, limit))
 
 @st.cache_data(ttl=3600)
 def fetch_post_comments(post_uuid):
@@ -95,7 +113,6 @@ def parse_comments(comments, post_uuid, post_title):
             'comment': comment['text'],
             'date': utc_to_eest(comment['created_at']).strftime('%Y-%m-%d %H:%M:%S %Z'),
             'likes': comment['likes'],
-            #'post_uuid': post_uuid,
             'post_title': post_title,
             'post_link': f"https://moescape.ai/posts/{post_uuid}"
         }
@@ -109,7 +126,6 @@ def parse_comments(comments, post_uuid, post_title):
                     'comment': f"↳ {reply['text']}",
                     'date': utc_to_eest(reply['created_at']).strftime('%Y-%m-%d %H:%M:%S %Z'),
                     'likes': reply['likes'],
-                    #'post_uuid': post_uuid,
                     'post_title': post_title,
                     'post_link': f"https://moescape.ai/posts/{post_uuid}"
                 }
@@ -124,49 +140,54 @@ num_posts = st.number_input('Number of posts to scan (max 2000)', min_value=1, m
 order = st.radio("Order of posts to analyze", ('Most Recent', 'Oldest'))
 
 if user_id and num_posts:
-    posts = fetch_user_posts(user_id, limit=num_posts)
+    posts_placeholder = st.empty()
+    progress_bar = st.progress(0)
+    all_comments = []
+    all_posts = []
     
-    if posts:
-        total_posts = len(posts)
-        st.write(f"Found {total_posts} posts")
+    for i, post in enumerate(fetch_user_posts_generator(user_id, limit=num_posts)):
+        all_posts.append(post)
+        posts_placeholder.write(f"Fetched {i+1} posts so far...")
+        progress_bar.progress(min((i+1) / num_posts, 1.0))
         
-        posts.sort(key=lambda x: x.get('created_at', ''), reverse=(order == 'Most Recent'))
-        
-        st.write(f"Analyzing the {'most recent' if order == 'Most Recent' else 'oldest'} {total_posts} posts")
-        
-        progress_bar = st.progress(0)
-        all_comments = []
-        
-        for i, post in enumerate(posts):
-            comments = fetch_post_comments(post['uuid'])
-            parsed_comments = parse_comments(comments, post['uuid'], post['title'])
-            all_comments.extend(parsed_comments)
-            progress_bar.progress((i + 1) / len(posts))
+    total_posts = len(all_posts)
+    posts_placeholder.write(f"Found {total_posts} posts in total")
+    
+    all_posts.sort(key=lambda x: x.get('created_at', ''), reverse=(order == 'Most Recent'))
+    
+    st.write(f"Analyzing the {'most recent' if order == 'Most Recent' else 'oldest'} {total_posts} posts")
+    
+    comment_progress_bar = st.progress(0)
+    
+    for i, post in enumerate(all_posts):
+        comments = fetch_post_comments(post['uuid'])
+        parsed_comments = parse_comments(comments, post['uuid'], post['title'])
+        all_comments.extend(parsed_comments)
+        comment_progress_bar.progress((i + 1) / len(all_posts))
 
-        if all_comments:
-            df = pd.DataFrame(all_comments)
-            
-            st.dataframe(
-                df,
-                column_config={
-                    "post_link": st.column_config.LinkColumn(
-                        "Post Link",
-                        help="Click to open the post",
-                        validate="https://moescape.ai/posts/.*",
-                        display_text="Open post"
-                    )
-                },
-                hide_index=True
-            )
-            
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "Download CSV",
-                csv,
-                "moescape_comments.csv",
-                "text/csv",
-                key='download-csv'
-            )
-        else:
-            st.write("No comments found for this user's posts.")
+    if all_comments:
+        df = pd.DataFrame(all_comments)
         
+        st.dataframe(
+            df,
+            column_config={
+                "post_link": st.column_config.LinkColumn(
+                    "Post Link",
+                    help="Click to open the post",
+                    validate="https://moescape.ai/posts/.*",
+                    display_text="Open post"
+                )
+            },
+            hide_index=True
+        )
+        
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "Download CSV",
+            csv,
+            "moescape_comments.csv",
+            "text/csv",
+            key='download-csv'
+        )
+    else:
+        st.write("No comments found for this user's posts.")
