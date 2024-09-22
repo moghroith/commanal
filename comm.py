@@ -60,23 +60,19 @@ def fetch_with_rate_limit(url):
             st.error(f"Failed to fetch data: {str(e)}")
         raise
 
-def fetch_user_posts_generator(user_id, limit=2000):
+def fetch_all_user_posts(user_id):
     offset = 0
     batch_size = 500  # API's maximum limit per request
-    total_fetched = 0
+    all_posts = []
 
-    while total_fetched < limit:
+    while True:
         url = f"https://api.moescape.ai/v1/users/{user_id}/posts?offset={offset}&limit={batch_size}"
         try:
             data = fetch_with_rate_limit(url)
             if not data:
                 break
             
-            for post in data:
-                if total_fetched >= limit:
-                    return
-                yield post
-                total_fetched += 1
+            all_posts.extend(data)
             
             if len(data) < batch_size:  # No more posts to fetch
                 break
@@ -86,13 +82,11 @@ def fetch_user_posts_generator(user_id, limit=2000):
             st.error(f"Error fetching posts: {str(e)}")
             break
 
-@st.cache_data(ttl=3600)
-def fetch_user_posts(user_id, limit=2000):
-    return list(fetch_user_posts_generator(user_id, limit))
+    return all_posts
 
 @st.cache_data(ttl=3600)
 def fetch_post_comments(post_uuid):
-    url = f"https://api.moescape.ai/v1/posts/{post_uuid}/comments?offset=0&limit=20"
+    url = f"https://api.moescape.ai/v1/posts/{post_uuid}/comments?offset=0&limit=100"  # Increased limit to 100
     data = fetch_with_rate_limit(url)
     if data:
         return data['comments']
@@ -137,33 +131,32 @@ st.title('Moescape User Posts and Comments')
 
 user_id = st.text_input('Enter User ID')
 num_posts = st.number_input('Number of posts to scan (max 2000)', min_value=1, max_value=2000, value=10)
-order = st.radio("Order of posts to analyze", ('Most Recent', 'Oldest'))
 
 if user_id and num_posts:
     posts_placeholder = st.empty()
     progress_bar = st.progress(0)
     all_comments = []
-    all_posts = []
     
-    for i, post in enumerate(fetch_user_posts_generator(user_id, limit=num_posts)):
-        all_posts.append(post)
-        posts_placeholder.write(f"Fetched {i+1} posts so far...")
-        progress_bar.progress(min((i+1) / num_posts, 1.0))
-        
+    posts_placeholder.write("Fetching all posts...")
+    all_posts = fetch_all_user_posts(user_id)
     total_posts = len(all_posts)
     posts_placeholder.write(f"Found {total_posts} posts in total")
     
-    all_posts.sort(key=lambda x: x.get('created_at', ''), reverse=(order == 'Most Recent'))
+    # Sort posts by creation date, oldest first
+    all_posts.sort(key=lambda x: x.get('created_at', ''))
     
-    st.write(f"Analyzing the {'most recent' if order == 'Most Recent' else 'oldest'} {total_posts} posts")
+    # Select the oldest 'num_posts'
+    posts_to_analyze = all_posts[:num_posts]
+    
+    st.write(f"Analyzing the oldest {len(posts_to_analyze)} posts")
     
     comment_progress_bar = st.progress(0)
     
-    for i, post in enumerate(all_posts):
+    for i, post in enumerate(posts_to_analyze):
         comments = fetch_post_comments(post['uuid'])
         parsed_comments = parse_comments(comments, post['uuid'], post['title'])
         all_comments.extend(parsed_comments)
-        comment_progress_bar.progress((i + 1) / len(all_posts))
+        comment_progress_bar.progress((i + 1) / len(posts_to_analyze))
 
     if all_comments:
         df = pd.DataFrame(all_comments)
