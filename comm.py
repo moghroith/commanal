@@ -22,7 +22,7 @@ class AdaptiveRateLimiter:
         now = time.time()
         time_since_last_call = now - self.last_call
         wait_time = max(0, (1 / self.current_rate) - time_since_last_call)
-        wait_time += random.uniform(0, self.jitter)  # Add jitter
+        wait_time += random.uniform(0, self.jitter)
         if wait_time > 0:
             time.sleep(wait_time)
         self.last_call = time.time()
@@ -47,14 +47,14 @@ def fetch_with_rate_limit(url):
     try:
         response = scraper.get(url)
         response.raise_for_status()
-        rate_limiter.increase_rate()  # Successful request, try increasing rate
+        rate_limiter.increase_rate()
         return response.json()
     except cloudscraper.exceptions.CloudflareChallengeError:
         st.error("Cloudflare challenge detected. Unable to bypass.")
         raise
     except Exception as e:
         if response.status_code == 429:
-            rate_limiter.decrease_rate()  # Rate limited, decrease rate
+            rate_limiter.decrease_rate()
             st.warning(f"Rate limited. Adjusting rate and retrying...")
         else:
             st.error(f"Failed to fetch data: {str(e)}")
@@ -62,7 +62,7 @@ def fetch_with_rate_limit(url):
 
 def fetch_all_user_posts(user_id):
     offset = 0
-    batch_size = 500  # API's maximum limit per request
+    batch_size = 500
     all_posts = []
 
     while True:
@@ -74,7 +74,7 @@ def fetch_all_user_posts(user_id):
             
             all_posts.extend(data)
             
-            if len(data) < batch_size:  # No more posts to fetch
+            if len(data) < batch_size:
                 break
             
             offset += batch_size
@@ -86,7 +86,7 @@ def fetch_all_user_posts(user_id):
 
 @st.cache_data(ttl=3600)
 def fetch_post_comments(post_uuid):
-    url = f"https://api.moescape.ai/v1/posts/{post_uuid}/comments?offset=0&limit=100"  # Increased limit to 100
+    url = f"https://api.moescape.ai/v1/posts/{post_uuid}/comments?offset=0&limit=500"
     data = fetch_with_rate_limit(url)
     if data:
         return data['comments']
@@ -131,6 +131,7 @@ st.title('Moescape User Posts and Comments')
 
 user_id = st.text_input('Enter User ID')
 num_posts = st.number_input('Number of posts to scan (max 2000)', min_value=1, max_value=2000, value=10)
+sort_order = st.radio("Select posts to analyze:", ("Oldest", "Newest"))
 
 if user_id and num_posts:
     posts_placeholder = st.empty()
@@ -142,13 +143,11 @@ if user_id and num_posts:
     total_posts = len(all_posts)
     posts_placeholder.write(f"Found {total_posts} posts in total")
     
-    # Sort posts by creation date, oldest first
-    all_posts.sort(key=lambda x: x.get('created_at', ''))
+    all_posts.sort(key=lambda x: x.get('created_at', ''), reverse=(sort_order == "Newest"))
     
-    # Select the oldest 'num_posts'
     posts_to_analyze = all_posts[:num_posts]
     
-    st.write(f"Analyzing the oldest {len(posts_to_analyze)} posts")
+    st.write(f"Analyzing the {sort_order.lower()} {len(posts_to_analyze)} posts")
     
     comment_progress_bar = st.progress(0)
     
